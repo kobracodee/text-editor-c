@@ -1,0 +1,15 @@
+CompileFlags:
+  Add:
+    [
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-IC:/Libraries/SDL2/include",
+      "-IC:/Libraries/SDL2/include/SDL2",
+      "-IC:/Libraries/SDL2_ttf/include",
+      "--target=x86_64-w64-mingw32",
+      "-D__USE_MINGW_ANSI_STDIO=1",
+      "-D_Scanf_format_string_impl_=int",
+      "-lSDL2",
+      "-lSDL2_ttf",
+    ]
