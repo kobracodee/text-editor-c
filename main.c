@@ -81,6 +81,42 @@ lines_t split_lines(const char *text) {
   return L;
 }
 
+void editor_ensure_cursor_visible(editor_t *editor, sdl_t *sdl,
+                                  int line_hieght) {
+  int lines_visible = sdl->window_height / line_hieght;
+
+  // Scroll down
+  if (editor->cursor_line >= editor->scroll_y + lines_visible) {
+    editor->scroll_y = editor->cursor_line - lines_visible + 1;
+  }
+
+  // Scroll down
+  if (editor->cursor_line < editor->scroll_y) {
+    editor->scroll_y = editor->cursor_line;
+  }
+
+  if (editor->scroll_y < 0)
+    editor->scroll_y = 0;
+}
+
+void editor_ensure_cursor_visible_horizontal(editor_t *editor, sdl_t *sdl,
+                                             int char_w) {
+  int cols_visible = (sdl->window_width - LINE_NUMBER_WIDTH - 5) / char_w;
+
+  // scroll right
+  if (editor->cursor_col >= editor->scroll_x + cols_visible) {
+    editor->scroll_x = editor->cursor_col - cols_visible + 1;
+  }
+
+  // scroll left
+  if (editor->cursor_col < editor->scroll_x) {
+    editor->scroll_x = editor->cursor_col;
+  }
+
+  if (editor->scroll_x < 0)
+    editor->scroll_x = 0;
+}
+
 bool init_sdl(sdl_t *sdl) {
   if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER) != 0) {
     SDL_Log("Could not initalize SDL! %s\n", SDL_GetError());
@@ -142,11 +178,18 @@ void final_cleanup(sdl_t *sdl, editor_t *e) {
 void handle_input(editor_t *editor, sdl_t *sdl) {
   SDL_Event event;
 
+  int line_h = TTF_FontHeight(sdl->Font.font);
+
+  int char_w = 0, char_h = 0;
+  TTF_SizeText(sdl->Font.font, "A", &char_w, &char_h);
+
   while (SDL_PollEvent(&event)) {
     switch (event.type) {
     case SDL_TEXTINPUT:
 
       editor_insert_char(editor, event.text.text[0]);
+      editor_ensure_cursor_visible(editor, sdl, line_h);
+      editor_ensure_cursor_visible_horizontal(editor, sdl, char_w);
       return;
     case SDL_WINDOWEVENT:
       if (event.window.event == SDL_WINDOWEVENT_RESIZED ||
@@ -169,27 +212,37 @@ void handle_input(editor_t *editor, sdl_t *sdl) {
       case SDLK_RETURN:
       case SDLK_KP_ENTER:
         editor_insert_char(editor, '\n');
+        editor_ensure_cursor_visible(editor, sdl, line_h);
         break;
       case SDLK_LEFT:
         editor_move_left(editor);
+        editor_ensure_cursor_visible(editor, sdl, line_h);
+        editor_ensure_cursor_visible_horizontal(editor, sdl, char_w);
         break;
       case SDLK_RIGHT:
         editor_move_right(editor);
+        editor_ensure_cursor_visible(editor, sdl, line_h);
+        editor_ensure_cursor_visible_horizontal(editor, sdl, char_w);
         break;
       case SDLK_UP:
         editor_move_up(editor);
+        editor_ensure_cursor_visible(editor, sdl, line_h);
         break;
       case SDLK_DOWN:
         editor_move_down(editor);
+        editor_ensure_cursor_visible(editor, sdl, line_h);
         break;
 
       case SDLK_BACKSPACE:
         editor_backspace(editor);
+        editor_ensure_cursor_visible(editor, sdl, line_h);
+        editor_ensure_cursor_visible_horizontal(editor, sdl, char_w);
         break;
       case SDLK_TAB:
         for (int i = 0; i < TAB_WIDTH; i++) {
           editor_insert_char(editor, ' ');
         }
+        editor_ensure_cursor_visible_horizontal(editor, sdl, char_w);
         break;
       case SDLK_ESCAPE:
         editor->state = QUIT;
@@ -248,8 +301,17 @@ int digit_count(int number) {
 }
 
 void render_cursor(editor_t *editor, sdl_t *sdl, int char_h, int char_w) {
-  int cursor_x = LINE_NUMBER_WIDTH + 5 + editor->cursor_col * char_w;
-  int cursor_y = 20 + editor->cursor_line * char_h;
+  // visible line / column = subtract scroll offset
+  int visible_line = editor->cursor_line - editor->scroll_y;
+  int visible_col = editor->cursor_col - editor->scroll_x;
+
+  if (visible_col < 0)
+    return;
+  if (visible_line < 0)
+    return;
+
+  int cursor_x = LINE_NUMBER_WIDTH + 5 + visible_col * char_w;
+  int cursor_y = 20 + visible_line * char_h;
 
   SDL_SetRenderDrawColor(sdl->renderer, 255, 255, 255, 255);
   SDL_Rect caret = {cursor_x, cursor_y, 2, char_h};
@@ -321,7 +383,16 @@ int main(int argc, char *argv[]) {
 
     int y = 20;
 
-    for (int i = 0; i < L.count; i++) {
+    int line_h = TTF_FontHeight(sdl.Font.font);
+
+    // int cols_visible = (sdl.window_width - LINE_NUMBER_WIDTH) / char_w;
+
+    for (int i = editor->scroll_y; i < L.count; i++) {
+
+      // stop when we draw outside the window
+      if (y > sdl.window_height)
+        break;
+
       const char *line = L.lines[i];
       if (line[0] == '\0') {
         line = " ";
@@ -329,17 +400,32 @@ int main(int argc, char *argv[]) {
 
       render_line_number(&sdl, i, light_gray, y, char_w);
 
-      // render the actual text
-      SDL_Rect text_rect = {LINE_NUMBER_WIDTH + 5, y, 0, 0};
-      SDL_Texture *text =
-          render_text(sdl.renderer, sdl.Font.font, line, white, &text_rect);
+      // Horizontal Scrolling
+      int visible_start = editor->scroll_x;
+      int line_len = strlen(line);
+      if (visible_start > line_len)
+        visible_start = line_len;
 
-      if (text) {
-        SDL_RenderCopy(sdl.renderer, text, NULL, &text_rect);
-        SDL_DestroyTexture(text);
+      int cols_visible = (sdl.window_width - LINE_NUMBER_WIDTH - 5) / char_w;
+      if (line_len <= cols_visible) {
+        editor->scroll_x = 0;
+      }
+      // pointer to visible substring
+      const char *visible_text = line + editor->scroll_x;
+
+      // render the actual text
+      if (visible_text[0] != '\0') {
+        SDL_Rect text_rect = {LINE_NUMBER_WIDTH + 5, y, 0, 0};
+        SDL_Texture *text = render_text(sdl.renderer, sdl.Font.font,
+                                        visible_text, white, &text_rect);
+
+        if (text) {
+          SDL_RenderCopy(sdl.renderer, text, NULL, &text_rect);
+          SDL_DestroyTexture(text);
+        }
       }
 
-      y += TTF_FontHeight(sdl.Font.font);
+      y += line_h;
     }
 
     if (editor->cursor_visible) {
@@ -347,6 +433,12 @@ int main(int argc, char *argv[]) {
     }
 
     SDL_RenderPresent(sdl.renderer);
+
+    for (int i = 0; i < L.count; i++) {
+      free(L.lines[i]);
+    }
+    free(L.lines);
+    free(msg);
   }
 
   gap_print(editor->buffer);

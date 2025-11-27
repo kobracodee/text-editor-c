@@ -25,6 +25,7 @@ editor_t *editor_create(size_t inital_capacity) {
 
   return e;
 }
+
 void editor_destory(editor_t *editor) {
   if (!editor)
     return;
