@@ -1,4 +1,5 @@
 #include "SDL_keyboard.h"
+#include "SDL_pixels.h"
 #include "SDL_rect.h"
 #include "SDL_timer.h"
 #include <stdint.h>
@@ -57,6 +58,7 @@ lines_t split_lines(const char *text) {
 
   L.count = count;
   L.lines = malloc(sizeof(char *) * count);
+  L.lines[0] = "";
 
   int idx = 0;
   const char *start = text;
@@ -245,17 +247,57 @@ int digit_count(int number) {
   return count;
 }
 
+void render_cursor(editor_t *editor, sdl_t *sdl, int char_h, int char_w) {
+  int cursor_x = LINE_NUMBER_WIDTH + 5 + editor->cursor_col * char_w;
+  int cursor_y = 20 + editor->cursor_line * char_h;
+
+  SDL_SetRenderDrawColor(sdl->renderer, 255, 255, 255, 255);
+  SDL_Rect caret = {cursor_x, cursor_y, 2, char_h};
+  SDL_RenderFillRect(sdl->renderer, &caret);
+}
+
+void render_line_number(sdl_t *sdl, int line_index, SDL_Color color, int y,
+                        int char_w) {
+  // render line line_number
+  char line_number_str[16];
+  snprintf(line_number_str, sizeof(line_number_str), "%d", line_index + 1);
+
+  int digits = digit_count(line_index + 1);
+  int number_w = digits * char_w;
+
+  SDL_Rect ln_rect = {LINE_NUMBER_WIDTH - number_w - 5, y, number_w,
+                      TTF_FontHeight(sdl->Font.font)};
+  // SDL_Rect ln_rect = {LINE_NUMBER_WIDTH / digit_count(i + 1), y,
+  //                     LINE_NUMBER_WIDTH / digit_count(i + 1),
+  //                     TTF_FontHeight(sdl.Font.font)};
+
+  SDL_Texture *ln_texture = render_text(sdl->renderer, sdl->Font.font,
+                                        line_number_str, color, &ln_rect);
+  if (ln_texture) {
+    SDL_RenderCopy(sdl->renderer, ln_texture, NULL, &ln_rect);
+    SDL_DestroyTexture(ln_texture);
+  }
+}
+
+void draw_line_number_background(sdl_t *sdl) {
+  // --- draw line-number gutter background ---
+  SDL_SetRenderDrawColor(sdl->renderer, 40, 40, 40, 255); // dark grey
+  SDL_Rect gutter = {0, 0, LINE_NUMBER_WIDTH, sdl->window_height};
+  SDL_RenderFillRect(sdl->renderer, &gutter);
+}
+
 int main(int argc, char *argv[]) {
   (void)argc;
   (void)argv;
+
+  SDL_Color white = {255, 255, 255, 255};
+  SDL_Color light_gray = {180, 180, 180, 255};
 
   editor_t *editor = editor_create(1024);
 
   sdl_t sdl = {0};
   if (!init_sdl(&sdl))
     exit(EXIT_FAILURE);
-
-  clear_screen(sdl);
 
   int char_w = 0, char_h = 0;
   TTF_SizeText(sdl.Font.font, "A", &char_w, &char_h);
@@ -264,13 +306,7 @@ int main(int argc, char *argv[]) {
     handle_input(editor, &sdl);
     clear_screen(sdl);
 
-    SDL_Color white = {255, 255, 255, 255};
-    SDL_Color light_gray = {180, 180, 180, 255};
-
-    // --- draw line-number gutter background ---
-    SDL_SetRenderDrawColor(sdl.renderer, 40, 40, 40, 255); // dark grey
-    SDL_Rect gutter = {0, 0, LINE_NUMBER_WIDTH, sdl.window_height};
-    SDL_RenderFillRect(sdl.renderer, &gutter);
+    draw_line_number_background(&sdl);
 
     char *msg = malloc(editor->buffer->capacity);
     gap_to_string(editor->buffer, msg);
@@ -283,12 +319,6 @@ int main(int argc, char *argv[]) {
 
     lines_t L = split_lines(msg);
 
-    if (L.count == 0) {
-      L.count = 1;
-      L.lines = malloc(sizeof(char *));
-      L.lines[0] = "";
-    }
-
     int y = 20;
 
     for (int i = 0; i < L.count; i++) {
@@ -297,25 +327,7 @@ int main(int argc, char *argv[]) {
         line = " ";
       }
 
-      // render line line_number
-      char line_number_str[16];
-      snprintf(line_number_str, sizeof(line_number_str), "%d", i + 1);
-
-      int digits = digit_count(i + 1);
-      int number_w = digits * char_w;
-
-      SDL_Rect ln_rect = {LINE_NUMBER_WIDTH - number_w - 5, y, number_w,
-                          TTF_FontHeight(sdl.Font.font)};
-      // SDL_Rect ln_rect = {LINE_NUMBER_WIDTH / digit_count(i + 1), y,
-      //                     LINE_NUMBER_WIDTH / digit_count(i + 1),
-      //                     TTF_FontHeight(sdl.Font.font)};
-
-      SDL_Texture *ln_texture = render_text(
-          sdl.renderer, sdl.Font.font, line_number_str, light_gray, &ln_rect);
-      if (ln_texture) {
-        SDL_RenderCopy(sdl.renderer, ln_texture, NULL, &ln_rect);
-        SDL_DestroyTexture(ln_texture);
-      }
+      render_line_number(&sdl, i, light_gray, y, char_w);
 
       // render the actual text
       SDL_Rect text_rect = {LINE_NUMBER_WIDTH + 5, y, 0, 0};
@@ -331,12 +343,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (editor->cursor_visible) {
-      int cursor_x = LINE_NUMBER_WIDTH + 5 + editor->cursor_col * char_w;
-      int cursor_y = 20 + editor->cursor_line * char_h;
-
-      SDL_SetRenderDrawColor(sdl.renderer, 255, 255, 255, 255);
-      SDL_Rect caret = {cursor_x, cursor_y, 2, char_h};
-      SDL_RenderFillRect(sdl.renderer, &caret);
+      render_cursor(editor, &sdl, char_h, char_w);
     }
 
     SDL_RenderPresent(sdl.renderer);
